@@ -48,6 +48,8 @@ class Cache(object):
         self.cache = {}
         self.head = None
         self.tail = None
+        self.similar_matches = {}
+        self.reverse_similar_matches = {}
 
     def process_prompt(self, prompt):
 
@@ -92,6 +94,8 @@ class Cache(object):
                 logging.info("Cached prompt \"{}\" has similarity {} with \"{}\"".format(
                     sim_prompt, maximum_similarity, prompt
                 ))
+                self.reverse_similar_matches[sim_prompt].add(prompt)
+                self.similar_matches[prompt] = sim_prompt
                 return _fetch_from_cache(sim_prompt)
             return None
 
@@ -101,6 +105,7 @@ class Cache(object):
             ))
             new_node = Node(prompt, embedding, response)
             self.cache[prompt] = new_node
+            self.reverse_similar_matches[prompt] = set()
             if self.head is None:
                 self.head = new_node
                 self.tail = new_node
@@ -110,17 +115,26 @@ class Cache(object):
             self.head = new_node
             if len(self.cache) > self.size:
                 del_node = self.tail
+                del_prompt = del_node.prompt
                 logging.info("Removing prompt \"{}\" and response \"{}\" from cache".format(
-                    del_node.prompt, del_node.response
+                    del_prompt, del_node.response
                 ))
-                del self.cache[del_node.prompt]
+                del self.cache[del_prompt]
                 self.tail = del_node.right
                 self.tail.left = None
+                for similar in self.reverse_similar_matches[del_prompt]:
+                    del self.similar_matches[similar]
+                del self.reverse_similar_matches[del_prompt]
 
         with self.lock:
             logging.info("Processing prompt \"{}\"".format(prompt))
             if prompt in self.cache:
                 return _fetch_from_cache(prompt, log=True)
+
+            if prompt in self.similar_matches:
+                similar_match = self.similar_matches[prompt]
+                logging.info('"%s" is similar to cached prompt "%s"', prompt, similar_match)
+                return _fetch_from_cache(similar_match)
 
             emb_response = openai.Embedding.create(input=prompt, engine=self.embedding_engine)
             embedding = np.array(emb_response['data'][0]['embedding'])
