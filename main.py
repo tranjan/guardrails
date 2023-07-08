@@ -51,8 +51,11 @@ class Cache(object):
 
     def process_prompt(self, prompt):
 
-        def _fetch_from_cache(prompt):
-            node = self.cache[prompt]
+        def _fetch_from_cache(cached_prompt, log=False):
+            if log == True:
+                logging.info("Fetching response for \"{}\" from cache".format(cached_prompt))
+
+            node = self.cache[cached_prompt]
             if node == self.head:
                 return node.response
             if node == self.tail:
@@ -75,6 +78,7 @@ class Cache(object):
         def _find_closest_match(embedding):
             if len(self.cache) == 0:
                 return None
+
             embedding_norm = np.linalg.norm(embedding)
             vals = list(self.cache.values())
             cache_embeddings = np.array([val.embedding for val in vals])
@@ -82,11 +86,19 @@ class Cache(object):
             denominator = np.linalg.norm(cache_embeddings, axis=1) * embedding_norm
             similarities = numerator / denominator
             max_sim_idx = np.argmax(similarities)
-            if similarities[max_sim_idx] > self.threshold:
-                return _fetch_from_cache(vals[max_sim_idx].prompt)
+            maximum_similarity = similarities[max_sim_idx]
+            if maximum_similarity > self.threshold:
+                sim_prompt = vals[max_sim_idx].prompt
+                logging.info("Cached prompt \"{}\" has similarity {} with \"{}\"".format(
+                    sim_prompt, maximum_similarity, prompt
+                ))
+                return _fetch_from_cache(sim_prompt)
             return None
 
-        def _add_prompt_to_cache(prompt, embedding, response):
+        def _add_prompt_to_cache(embedding, response):
+            logging.info("Adding prompt \"{}\" and response \"{}\" to cache".format(
+                prompt, response
+            ))
             new_node = Node(prompt, embedding, response)
             self.cache[prompt] = new_node
             if self.head is None:
@@ -98,14 +110,17 @@ class Cache(object):
             self.head = new_node
             if len(self.cache) > self.size:
                 del_node = self.tail
+                logging.info("Removing prompt \"{}\" and response \"{}\" from cache".format(
+                    del_node.prompt, del_node.response
+                ))
                 del self.cache[del_node.prompt]
                 self.tail = del_node.right
                 self.tail.left = None
 
-
         with self.lock:
+            logging.info("Processing prompt \"{}\"".format(prompt))
             if prompt in self.cache:
-                return _fetch_from_cache(prompt)
+                return _fetch_from_cache(prompt, log=True)
 
             emb_response = openai.Embedding.create(input=prompt, engine=self.embedding_engine)
             embedding = np.array(emb_response['data'][0]['embedding'])
@@ -114,9 +129,11 @@ class Cache(object):
                 return closest_match
 
             messages = [{'role': 'system', 'content': prompt}]
+            logging.info("Calling LLM with prompt \"{}\"".format(prompt))
             chat = openai.ChatCompletion.create(model=self.llm_model, messages=messages)
             chat_response = chat.choices[0].message.content
-            _add_prompt_to_cache(prompt, embedding, chat_response)
+            _add_prompt_to_cache(embedding, chat_response)
+            logging.info("Returning response \"{}\" for prompt \"{}\"".format(chat_response, prompt))
             return chat_response
 
 if __name__ == '__main__':
@@ -142,9 +159,19 @@ if __name__ == '__main__':
     openai.api_key = args.api_key_file.read().strip()
     embedding_engine = "text-similarity-{}-001".format(args.text_similarity_model)
     threshold = args.text_similarity_threshold
+    cache_size = args.cache_size
+
+    logging.basicConfig(format='%(asctime)s - %(message)s', level=logging.INFO)
+    config_dict = {
+        'Embedding engine': embedding_engine,
+        'Similarity threshold': threshold,
+        'Cache size': cache_size,
+        'API key file': args.api_key_file.name
+    }
+    logging.info('Starting API ({})'.format(str(config_dict)))
 
     app = Flask(__name__)
-    cache = Cache(args.cache_size, embedding_engine, threshold)
+    cache = Cache(cache_size, embedding_engine, threshold)
 
     @app.route('/')
     def process_prompt():
