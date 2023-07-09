@@ -36,7 +36,7 @@ class Node(object):
 class Cache(object):
 
     def __init__(self,
-                 size,
+                 size=DEFAULT_CACHE_SIZE,
                  embedding_engine="text-similarity-{}-001".format(DEFAULT_TEXT_SIMILARITY_MODEL),
                  threshold=DEFAULT_SIMILARITY_THRESHOLD,
                  llm_model="gpt-3.5-turbo"):
