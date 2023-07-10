@@ -2,9 +2,11 @@ import argparse
 import numpy as np
 import threading
 import logging
+import os
 
 from flask import Flask, request
-import openai
+from guardrails.embedding import OpenAIEmbedding
+from guardrails.llm_providers import openai_chat_wrapper
 
 TEXT_SIMILARITY_MODELS = ["ada", "babbage", "curie", "davinci"]
 
@@ -38,13 +40,12 @@ class Cache(object):
     def __init__(self,
                  size=DEFAULT_CACHE_SIZE,
                  embedding_engine="text-similarity-{}-001".format(DEFAULT_TEXT_SIMILARITY_MODEL),
-                 threshold=DEFAULT_SIMILARITY_THRESHOLD,
-                 llm_model="gpt-3.5-turbo"):
+                 threshold=DEFAULT_SIMILARITY_THRESHOLD):
+        self.embedding = OpenAIEmbedding(embedding_engine)
         self.lock = threading.Lock()
         self.threshold = threshold
         self.size = size
         self.embedding_engine = embedding_engine
-        self.llm_model = llm_model
         self.cache = {}
         self.head = None
         self.tail = None
@@ -136,19 +137,16 @@ class Cache(object):
                 logging.info('"%s" is similar to cached prompt "%s"', prompt, similar_match)
                 return _fetch_from_cache(similar_match)
 
-            emb_response = openai.Embedding.create(input=prompt, engine=self.embedding_engine)
-            embedding = np.array(emb_response['data'][0]['embedding'])
+            embedding = np.array(self.embedding.embed([prompt])[0])
             closest_match = _find_closest_match(embedding)
             if closest_match is not None:
                 return closest_match
 
-            messages = [{'role': 'system', 'content': prompt}]
             logging.info("Calling LLM with prompt \"{}\"".format(prompt))
-            chat = openai.ChatCompletion.create(model=self.llm_model, messages=messages)
-            chat_response = chat.choices[0].message.content
-            _add_prompt_to_cache(embedding, chat_response)
-            logging.info("Returning response \"{}\" for prompt \"{}\"".format(chat_response, prompt))
-            return chat_response
+            response = openai_chat_wrapper(prompt)
+            _add_prompt_to_cache(embedding, response)
+            logging.info("Returning response \"{}\" for prompt \"{}\"".format(response, prompt))
+            return response
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Guardrails embedding API coding challenge')
@@ -170,7 +168,7 @@ if __name__ == '__main__':
                         help="Size of the cache (must be greater than 0)")
     args = parser.parse_args()
 
-    openai.api_key = args.api_key_file.read().strip()
+    os.environ['OPENAI_API_KEY'] = args.api_key_file.read().strip()
     embedding_engine = "text-similarity-{}-001".format(args.text_similarity_model)
     threshold = args.text_similarity_threshold
     cache_size = args.cache_size
