@@ -149,11 +149,7 @@ class Cache(object):
             return response
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Guardrails embedding API coding challenge')
-    parser.add_argument('--api_key_file',
-                        required=True,
-                        type=argparse.FileType('r'),
-                        help="Path of a file consisting only of an OpenAI API key")
+    parser = argparse.ArgumentParser(description='Guardrails cache coding challenge')
     parser.add_argument('--text_similarity_model',
                         type=str,
                         default=DEFAULT_TEXT_SIMILARITY_MODEL,
@@ -168,7 +164,6 @@ if __name__ == '__main__':
                         help="Size of the cache (must be greater than 0)")
     args = parser.parse_args()
 
-    os.environ['OPENAI_API_KEY'] = args.api_key_file.read().strip()
     embedding_engine = "text-similarity-{}-001".format(args.text_similarity_model)
     threshold = args.text_similarity_threshold
     cache_size = args.cache_size
@@ -177,10 +172,9 @@ if __name__ == '__main__':
     config_dict = {
         'Embedding engine': embedding_engine,
         'Similarity threshold': threshold,
-        'Cache size': cache_size,
-        'API key file': args.api_key_file.name
+        'Cache size': cache_size
     }
-    logging.info('Starting API ({})'.format(str(config_dict)))
+    logging.info('Starting cache API ({})'.format(str(config_dict)))
 
     app = Flask(__name__)
     cache = Cache(cache_size, embedding_engine, threshold)
